@@ -24,6 +24,7 @@ import git
 
 from collections import OrderedDict
 from subprocess import check_call
+from optparse import OptionParser
 
 class mkcardException(Exception):
 	pass
@@ -67,13 +68,25 @@ partitions = [
 	}
 ]
 
-
+# defaults
 device_path = "/dev/sdc"
 firmware_path = "/home/rngadam/lophilo/upstream/firmware-binaries"
 os_path = "/home/rngadam/lophilo.nfs"
 rsync_command = "rsync -avz --delete-delay --exclude-from excluded-files"
 rsync_command_delete_excluded = "%s --delete-excluded" % rsync_command
 target_rev = 'tabbyrev1'
+
+# command-line parsing
+parser = OptionParser()
+parser.add_option(
+	"-d", "--device", 
+	action="store", type="string", dest="device_path",
+	help="write report to FILE", metavar="DEVICE")
+
+(options, args) = parser.parse_args()
+
+if options.device_path is not None:
+	device_path = options.device_path
 
 if os.getenv("USER") != "root":
 	raise mkcardException("Must be run as root")
@@ -176,6 +189,11 @@ def create_cmd(kcmd, overrides=None):
 	params.extend([k for k in kcmd if not kcmd[k]])
 	return ' '.join(params)
 
+def force_umount(device_path):
+	print "forcing umount of %s, ignore errors" % device_path
+	os.system("pumount %s1" % (device_path))	
+	os.system("pumount %s2" % (device_path))	
+
 def verify_repos(target_rev, repo_paths):
 	for repo_path in repo_paths:
 		repo = git.Repo(repo_path)
@@ -188,6 +206,7 @@ def verify_repos(target_rev, repo_paths):
 
 try:
 	
+	force_umount(device_path)
 	if verify_partitions(device_path, partitions):
 		print "partitions are OK"
 	else:
