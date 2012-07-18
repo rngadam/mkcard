@@ -11,7 +11,7 @@
 # http://linux1.fnal.gov/linux/fermi/obsolete/lts309/x86_64/sites/Fermi/RHupdates/fsset.py
 # http://magicinstaller2.googlecode.com/svn-history/r34/trunk/src/magic.installer/operations/parted.py
 
-# doc for git
+# doc for GitPython
 # http://packages.python.org/GitPython/0.1/intro.html#getting-started
 
 import _ped
@@ -62,7 +62,7 @@ partitions = [
 	{
 	'start': 62,
 	'end': 1998011,
-	'type': _ped.file_system_type_get("fat16")
+	'type': _ped.file_system_type_get("fat32")
 	},
 	{
 	'start': 1998012,
@@ -123,7 +123,6 @@ def verify_partitions(device_path, partitions):
 			print "end is not the same. current: %d target: %d" % (current_partition_end, target_partition_end)
 			return False
 
-
 		# check if the partition are in use... if yes, abort
 		if current_partition.busy:
 			raise mkcardException("Partition is busy %s, please umount first" % current_partition)
@@ -153,31 +152,29 @@ def create_partitions(device_path, partitions):
 
 	disk.commit()
 
-def format_disks(device_path):
+def format_boot(device_path):
 	print "FORMATTING BOOT"
-	simple_call("mkfs.msdos -F 16 %s1 -n BOOT -v" % (device_path))
+	simple_call("dd if=/dev/zero of=%s1 bs=512 count=1" % (device_path))
+	simple_call("mkfs.msdos -F 32 %s1 -n BOOT -v" % (device_path))
+
+def format_os(device_path):
 	print "FORMATTING EXT4"
 	simple_call("mkfs.ext4 %s2 -L os -v" % (device_path))
+
+def format_swap(device_path):
 	print "FORMATTING SWAP"	
 	simple_call("mkswap -L lplswap %s3" % (device_path))	
 
 def simple_call(params):
 	check_call(params.split(' '))
 
-def sync_os(device_path, firmware_path, os_path):
+def sync_firmware(device_path, firmware_path):
 	target_boot_dir = "/media/BOOT"
-	target_os_dir = "/media/os"
 	# mount partitions created
 	simple_call("pmount %s1 BOOT" % (device_path))	
-	simple_call("pmount %s2 os" % (device_path))	
 
-	# now mounted as /media/BOOT and /media/os
+	# now mounted as /media/BOOT
 	simple_call("%s %s/ %s/" % (rsync_command, firmware_path, target_boot_dir))
-	simple_call("%s %s/ %s/" % (rsync_command_delete_excluded, os_path, target_os_dir))
-
-	# slightly different configuration between
-	# NFS boot and MicroSD card boot
-	shutil.copy2('microsd-fstab', '%s/etc/fstab' % os_path)
 
 	# write the kcmd references
 	file('%s/kcmd_default.txt' % target_boot_dir, "w+").write(create_cmd(kcmd_default))
@@ -189,6 +186,20 @@ def sync_os(device_path, firmware_path, os_path):
 	
 	# umount all
 	simple_call("pumount %s1" % (device_path))	
+
+def sync_os(device_path, os_path):
+	target_os_dir = "/media/os"
+	# mount partitions created
+	simple_call("pmount %s2 os" % (device_path))	
+
+	# now mounted as /media/BOOT and /media/os
+	simple_call("%s %s/ %s/" % (rsync_command_delete_excluded, os_path, target_os_dir))
+
+	# slightly different configuration between
+	# NFS boot and MicroSD card boot
+	shutil.copy2('microsd-fstab', '%s/etc/fstab' % os_path)
+	
+	# umount all
 	simple_call("pumount %s2" % (device_path))	
 
 def create_cmd(kcmd, overrides=None):
@@ -225,11 +236,13 @@ try:
 	else:
 		print "partitions don't match target, recreating"	
 		create_partitions(device_path, partitions)
-		format_disks(device_path)
+		format_os(device_path)
+		format_boot(device_path)
+		format_swap(device_path)
 
 	verify_repos(target_rev, [firmware_path, os_path])
-
-	sync_os(device_path, firmware_path, os_path)
+	
+	sync_firmware(device_path, firmware_path)
 
 except Exception as e:
 	tb = traceback.format_exc()
