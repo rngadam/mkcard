@@ -50,20 +50,28 @@ kcmd_nfs = OrderedDict({
 
 #TODO: calculate start/end or use constraints...
 # configuration below assumes 8GB sd card...
+#
+# taken from this working config:
+#
+#   Device Boot      Start         End      Blocks   Id  System
+#   /dev/sdb1   *          62     1998011      998975    b  W95 FAT32
+#   /dev/sdb2         1998012    12483771     5242880   83  Linux
+#   /dev/sdb3        12483772    15556607     1536418   82  Linux swap / Solaris
+
 partitions = [
 	{
-	'start': 2048,
-	'end': 1044224,
+	'start': 62,
+	'end': 1998011,
 	'type': _ped.file_system_type_get("fat16")
 	},
 	{
-	'start': 1044225,
-	'end': 14362109,
+	'start': 1998012,
+	'end': 12483771,
 	'type': _ped.file_system_type_get("ext4")		
 	},
 	{
-	'start': 14362110,
-	'end': 15550919,
+	'start': 12483772,
+	'end': 15556607,
 	'type': _ped.file_system_type_get("linux-swap")	
 	}
 ]
@@ -94,6 +102,11 @@ if os.getenv("USER") != "root":
 def verify_partitions(device_path, partitions):
 	device = parted.getDevice(device_path)
 	disk = parted.Disk(device)
+
+	if len(partitions) != len(disk.partitions):
+		print "partitions differ in length: desired %d current %d" % (len(partitions), len(disk.partitions))
+		return False
+
 	for part_id in xrange(0, len(partitions)):
 		current_partition = disk.partitions[part_id]
 		target_partition = partitions[part_id]
@@ -132,11 +145,11 @@ def create_partitions(device_path, partitions):
 
  	constraint = parted.Constraint(device=device)
 
- 	for partition in partitions:
-		geometry = parted.Geometry(device=device, start=partition.start, end=partition.end)
+ 	for params in partitions:
+		geometry = parted.Geometry(device=device, start=params['start'], end=params['end'])
 		partition = parted.Partition(disk=disk, type=parted.PARTITION_NORMAL, geometry=geometry)
 		disk.addPartition(partition,constraint=constraint)
-		partition.getPedPartition().set_system(partition.type)
+		partition.getPedPartition().set_system(params['type'])
 
 	disk.commit()
 
