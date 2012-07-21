@@ -25,6 +25,7 @@ import git
 from collections import OrderedDict
 from subprocess import check_call
 from optparse import OptionParser
+from subprocess import Popen, PIPE
 
 class mkcardException(Exception):
 	pass
@@ -32,16 +33,19 @@ class mkcardException(Exception):
 
 kcmd_default = OrderedDict({
 	'mem': '128M',
-	'ip': 'dhcp',
+	'ip': 'none',
 	'noinitrd': None,
 	'init': '/sbin/init',
 	'rw': None,
 	'root': '/dev/mmcblk0p2',
-	'elevator': 'noop'
+	'elevator': 'noop',
+	'console': 'ttyS0',
+	'rootwait': None
 })
 
 kcmd_nfs = OrderedDict({
 	'root': '/dev/nfs',
+	'ip': 'dhcp',
 	'nfsroot': '10.42.0.1:/home/rngadam/lophilo.nfs',
 	'nfsrootdebug': None,
 	'rootwait': None,
@@ -58,28 +62,47 @@ kcmd_nfs = OrderedDict({
 #   /dev/sdb2         1998012    12483771     5242880   83  Linux
 #   /dev/sdb3        12483772    15556607     1536418   82  Linux swap / Solaris
 
+# partitions = [
+# 	{
+# 	'start': 62,
+# 	'end': 1998011,
+# 	'type': _ped.file_system_type_get("fat32")
+# 	},
+# 	{
+# 	'start': 1998012,
+# 	'end': 12483771,
+# 	'type': _ped.file_system_type_get("ext4")		
+# 	},
+# 	{
+# 	'start': 12483772,
+# 	'end': 15556607,
+# 	'type': _ped.file_system_type_get("linux-swap")	
+# 	}
+# ]
+
+# created with parted
 partitions = [
 	{
-	'start': 62,
-	'end': 1998011,
+	'start': 63,
+	'end': 1992059,
 	'type': _ped.file_system_type_get("fat32")
 	},
 	{
-	'start': 1998012,
-	'end': 12483771,
+	'start': 1992060,
+	'end': 12482504 ,
 	'type': _ped.file_system_type_get("ext4")		
 	},
 	{
-	'start': 12483772,
-	'end': 15556607,
+	'start': 12482505,
+	'end': 15550919 ,
 	'type': _ped.file_system_type_get("linux-swap")	
 	}
 ]
-
 # defaults
-device_path = "/dev/sdc"
-firmware_path = "/home/rngadam/lophilo/upstream/firmware-binaries"
-os_path = "/home/rngadam/lophilo.nfs"
+device_path = "/dev/sdb"
+firmware_path = "%s/lophilo/upstream/firmware-binaries" % os.getenv("HOME")
+os_path = "%s/lophilo.nfs" % os.getenv("HOME")
+
 rsync_command = "rsync -avz --delete-delay --exclude-from excluded-files"
 rsync_command_delete_excluded = "%s --delete-excluded" % rsync_command
 target_rev = 'tabbyrev1'
@@ -90,11 +113,25 @@ parser.add_option(
 	"-d", "--device", 
 	action="store", type="string", dest="device_path",
 	help="write report to FILE", metavar="DEVICE")
-
+parser.add_option(
+	"-f", "--firmware", 
+	action="store", type="string", dest="firmware_path",
+	help="source firmware directory", metavar="DIRECTORY")
+parser.add_option(
+	"-o", "--os", 
+	action="store", type="string", dest="os_path",
+	help="source OS directory", metavar="DIRECTORY")
+parser.add_option("-s", "--skip_partition",
+                  action="store_true", dest="skip_partition", default=False,
+                  help="don't check and change partitions")
 (options, args) = parser.parse_args()
 
 if options.device_path is not None:
 	device_path = options.device_path
+if options.firmware_path is not None:
+	firmware_path = options.firmware_path
+if options.os_path is not None:
+	os_path = options.os_path
 
 if os.getenv("USER") != "root":
 	raise mkcardException("Must be run as root")
@@ -153,9 +190,9 @@ def create_partitions(device_path, partitions):
 	disk.commit()
 
 def format_boot(device_path):
-	print "FORMATTING BOOT"
+	print "FORMATTING BOOT (FAT32)"
 	simple_call("dd if=/dev/zero of=%s1 bs=512 count=1" % (device_path))
-	simple_call("mkfs.msdos -F 32 %s1 -n BOOT -v" % (device_path))
+	simple_call("mkdosfs -F 32 %s1 -n BOOT -v" % (device_path))
 
 def format_os(device_path):
 	print "FORMATTING EXT4"
@@ -176,9 +213,17 @@ def sync_firmware(device_path, firmware_path):
 	# now mounted as /media/BOOT
 	simple_call("%s %s/ %s/" % (rsync_command, firmware_path, target_boot_dir))
 
+	# git version 
+	repo = git.Repo(firmware_path)
+	file('%s/firmware.txt' % target_boot_dir, "w+").write(repo.git.describe("--always") + "\n")
+
 	# write the kcmd references
-	file('%s/kcmd_default.txt' % target_boot_dir, "w+").write(create_cmd(kcmd_default))
-	file('%s/kcmd_nfs.txt' % target_boot_dir, "w+").write(create_cmd(kcmd_default, kcmd_nfs))
+	# there's a bug in one version of mboot that requires the string to be
+	# aligned to 4 bytes. We append some spaces to prevent cutting the cmdline
+	kcmd_default_str = create_cmd(kcmd_default) + "    "
+	file('%s/kcmd_default.txt' % target_boot_dir, "w+").write(kcmd_default_str)
+	kcmd_nfs_str = create_cmd(kcmd_default, kcmd_nfs) + "    "
+	file('%s/kcmd_nfs.txt' % target_boot_dir, "w+").write(kcmd_nfs_str)
 	kcmd_main_path = '%s/kcmd.txt' % target_boot_dir
 	if os.path.isfile(kcmd_main_path):
 		shutil.copy2(kcmd_main_path, '%s/kcmd.txt.bak' % target_boot_dir)	
@@ -218,6 +263,13 @@ def force_umount(device_path):
 	os.system("pumount %s1" % (device_path))	
 	os.system("pumount %s2" % (device_path))	
 
+def partition_copy(device_path):
+	simple_call("dd if=/dev/zero of=%s bs=1024 count=1" % device_path)
+	simple_call("dd if=partition-table of=%s bs=512 count=1" % device_path)
+
+def boot_partition_copy(device_path):
+	simple_call("dd if=dos-partition-extract of=%s1" % device_path)
+
 def verify_repos(target_rev, repo_paths):
 	for repo_path in repo_paths:
 		repo = git.Repo(repo_path)
@@ -231,17 +283,26 @@ def verify_repos(target_rev, repo_paths):
 try:
 	
 	force_umount(device_path)
-	if verify_partitions(device_path, partitions):
-		print "partitions are OK"
-	else:
-		print "partitions don't match target, recreating"	
-		create_partitions(device_path, partitions)
-		format_os(device_path)
-		format_boot(device_path)
-		format_swap(device_path)
 
-	verify_repos(target_rev, [firmware_path, os_path])
-	
+	if not options.skip_partition:
+		if verify_partitions(device_path, partitions):
+			print "partitions are OK"
+		else:
+			print "partitions don't match target, recreating"	
+			create_partitions(device_path, partitions)
+			#partition_copy(device_path)
+
+			#format_boot(device_path)
+			boot_partition_copy(device_path)
+			format_swap(device_path)
+			format_os(device_path)
+	else:
+		print "skipping partition check"
+		
+
+	#verify_repos(target_rev, [firmware_path, os_path])
+
+	sync_os(device_path, os_path)	
 	sync_firmware(device_path, firmware_path)
 
 except Exception as e:
