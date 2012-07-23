@@ -62,47 +62,46 @@ kcmd_nfs = OrderedDict({
 #   /dev/sdb2         1998012    12483771     5242880   83  Linux
 #   /dev/sdb3        12483772    15556607     1536418   82  Linux swap / Solaris
 
-# partitions = [
-# 	{
-# 	'start': 62,
-# 	'end': 1998011,
-# 	'type': _ped.file_system_type_get("fat32")
-# 	},
-# 	{
-# 	'start': 1998012,
-# 	'end': 12483771,
-# 	'type': _ped.file_system_type_get("ext4")		
-# 	},
-# 	{
-# 	'start': 12483772,
-# 	'end': 15556607,
-# 	'type': _ped.file_system_type_get("linux-swap")	
-# 	}
-# ]
-
-# created with parted
 partitions = [
 	{
-	'start': 63,
-	'end': 1992059,
+	'start': 62,
+	'end': 1998011,
 	'type': _ped.file_system_type_get("fat32")
 	},
 	{
-	'start': 1992060,
-	'end': 12482504 ,
+	'start': 1998012,
+	'end': 12491387,
 	'type': _ped.file_system_type_get("ext4")		
 	},
 	{
-	'start': 12482505,
-	'end': 15550919 ,
+	'start': 12491388,
+	'end': 15541787,
 	'type': _ped.file_system_type_get("linux-swap")	
 	}
 ]
+
+# created with parted
+#partitions = [
+#	{
+#	'start': 63,
+#	'end': 1992059,
+#	'type': _ped.file_system_type_get("fat32")
+#	},
+#	{
+#	'start': 1992060,
+#	'end': 12482504 ,
+#	'type': _ped.file_system_type_get("ext4")		
+#	},
+#	{
+#	'start': 12482505,
+#	'end': 15550919 ,
+#	'type': _ped.file_system_type_get("linux-swap")	
+#	}
+#]
 # defaults
 device_path = "/dev/sdb"
 firmware_path = "%s/lophilo/upstream/firmware-binaries" % os.getenv("HOME")
 os_path = "%s/lophilo.nfs" % os.getenv("HOME")
-
 rsync_command = "rsync -avz --delete-delay --exclude-from excluded-files"
 rsync_command_delete_excluded = "%s --delete-excluded" % rsync_command
 target_rev = 'tabbyrev1'
@@ -124,6 +123,16 @@ parser.add_option(
 parser.add_option("-s", "--skip_partition",
                   action="store_true", dest="skip_partition", default=False,
                   help="don't check and change partitions")
+parser.add_option("-b", "--format_boot",
+                  action="store_true", dest="format_boot", default=False,
+                  help="force format boot partition")
+parser.add_option("-m", "--format_os",
+                  action="store_true", dest="format_os", default=False,
+                  help="force format OS partition")
+parser.add_option("-w", "--format_swap",
+                  action="store_true", dest="format_swap", default=False,
+                  help="force format SWAP partition")
+
 (options, args) = parser.parse_args()
 
 if options.device_path is not None:
@@ -290,15 +299,19 @@ try:
 		else:
 			print "partitions don't match target, recreating"	
 			create_partitions(device_path, partitions)
-			#partition_copy(device_path)
+			options.format_boot = True
+			options.format_os = True
+			options.format_swap = True
 
-			#format_boot(device_path)
-			boot_partition_copy(device_path)
-			format_swap(device_path)
-			format_os(device_path)
 	else:
 		print "skipping partition check"
 		
+	if options.format_boot:
+		format_boot(device_path)
+	if options.format_os:
+		format_os(device_path)
+	if options.format_swap:
+		format_swap(device_path)
 
 	#verify_repos(target_rev, [firmware_path, os_path])
 
