@@ -21,6 +21,7 @@ import traceback
 import parted
 import shutil
 import git
+import sys
 
 from collections import OrderedDict
 from subprocess import check_call
@@ -52,58 +53,25 @@ kcmd_nfs = OrderedDict({
     'rootfstype': 'nfs',
 })
 
-#TODO: calculate start/end or use constraints...
-# configuration below assumes 8GB sd card...
-#
-# taken from this working config:
-#
-#   Device Boot      Start         End      Blocks   Id  System
-#   /dev/sdb1   *          62     1998011      998975    b  W95 FAT32
-#   /dev/sdb2         1998012    12483771     5242880   83  Linux
-#   /dev/sdb3        12483772    15556607     1536418   82  Linux swap / Solaris
-
 partitions = [
     {
-    'start': 62,
-    'end': 1998011,
-    'type': _ped.file_system_type_get("fat32")
+    'length': 128,
+    'type': "fat32"
     },
     {
-    'start': 1998012,
-    'end': 12491387,
-    'type': _ped.file_system_type_get("ext4")       
+    'type': "ext4"
     },
     {
-    'start': 12491388,
-    'end': 15541787,
-    'type': _ped.file_system_type_get("linux-swap") 
+    'length': 256,
+    'type': "linux-swap"
     }
 ]
-
-# created with parted
-#partitions = [
-#   {
-#   'start': 63,
-#   'end': 1992059,
-#   'type': _ped.file_system_type_get("fat32")
-#   },
-#   {
-#   'start': 1992060,
-#   'end': 12482504 ,
-#   'type': _ped.file_system_type_get("ext4")       
-#   },
-#   {
-#   'start': 12482505,
-#   'end': 15550919 ,
-#   'type': _ped.file_system_type_get("linux-swap") 
-#   }
-#]
 
 
 if os.getenv("USER") != "root":
     raise mkcardException("Must be run as root")
 
-basedir = os.path.dirname(os.environ['_'])
+basedir = sys.path[0]
 
 # defaults
 rsync_command_os = (
@@ -117,6 +85,8 @@ target_rev = 'tabbyrev1'
 
 # command-line parsing
 parser = OptionParser()
+
+# PARAMETERS
 parser.add_option("-d", "--device", 
                   action="store", type="string", dest="device_path",
                   help="use DEVICE", metavar="DEVICE",
@@ -137,6 +107,8 @@ parser.add_option("-t", "--target_os", action="store",
                   type="string", dest="target_os_path",
                   help="target firmware directory", metavar="DIRECTORY",
                   default="/media/os")
+
+# ACTIONS
 parser.add_option("-c", "--create_partition",
                   action="store_true", dest="create_partition", 
                   help="check and change partitions",
@@ -158,13 +130,13 @@ parser.add_option("-n", "--mount",
                   help="mount partitions to filesystem",
                   default=False,)
 parser.add_option("-a", "--sync_os",
-                  action="store_false", dest="sync_os", 
+                  action="store_true", dest="sync_os", 
                   help="sync OS filesystem",
-                  default=True,)
+                  default=False,)
 parser.add_option("-z", "--sync_firmware",
-                  action="store_false", dest="sync_firmware", 
+                  action="store_true", dest="sync_firmware", 
                   help="sync firmware filesystem",
-                  default=True)
+                  default=False)
 
 (options, args) = parser.parse_args()
 
@@ -179,25 +151,34 @@ def verify_partitions(device_path, partitions):
 
     for part_id in xrange(0, len(partitions)):
         current_partition = disk.partitions[part_id]
-        target_partition = partitions[part_id]
-        
-        current_partition_start = current_partition.getPedPartition().geom.start
-        target_partition_start = target_partition['start']
-        if current_partition_start != target_partition_start:
-            print "start is not the same. current: %d target: %d" % (current_partition_start, target_partition_start)
-            return False
+        target_partition = partitions[part_id]        
 
-        current_partition_end = current_partition.getPedPartition().geom.end
-        target_partition_end = target_partition['end']
-        if current_partition_end != target_partition_end:
-            print "end is not the same. current: %d target: %d" % (current_partition_end, target_partition_end)
-            return False
+        # current_partition_start = current_partition.getPedPartition().geom.start
+        # target_partition_start = target_partition['start']
+        # if current_partition_start != target_partition_start:
+        #     print "start is not the same. current: %d target: %d" % (current_partition_start, target_partition_start)
+        #     return False
+
+        # current_partition_end = current_partition.getPedPartition().geom.end
+        # target_partition_end = target_partition['end']
+        # if current_partition_end != target_partition_end:
+        #     print "end is not the same. current: %d target: %d" % (current_partition_end, target_partition_end)
+        #     return False
 
         # check if the partition are in use... if yes, abort
+        current_fs_type = current_partition.fileSystem.getPedFileSystem().type.name
+        if current_fs_type != target_partition['type']:
+            print "partition type does not match: expected %s, got %s" % (target_partition['type'], current_fs_type)
+            return False
+
         if current_partition.busy:
             raise mkcardException("Partition is busy %s, please umount first" % current_partition)
+
     return True
 
+
+def mb_to_sector(disk, mb):
+    return  mb*1024*1024/disk.device.sectorSize
 
 def create_partitions(device_path, partitions):
     device = parted.getDevice(device_path)
@@ -213,14 +194,18 @@ def create_partitions(device_path, partitions):
     disk = parted.freshDisk(device, _ped.disk_type_get("msdos"))
 
     constraint = parted.Constraint(device=device)
-
-    for params in partitions:
-        geometry = parted.Geometry(device=device, start=params['start'], end=params['end'])
-        partition = parted.Partition(disk=disk, type=parted.PARTITION_NORMAL, geometry=geometry)
+    max_length_sectors = disk.device.getLength()
+    fat32_size = mb_to_sector(disk, partitions[0].length)
+    swap_size = mb_to_sector(disk, partitions[2].length)
+    ext4_size = max_length_sectors - (fat32_size+swap_size)
+    fat32_geom = parted.Geometry(device=device, start=0, length=fat32_size)
+    ext4_geom = parted.Geometry(device=device, start=fat32_size, length=ext4_size)
+    swap_geom = parted.Geometry(device=device, start=ext4_size+fat32_size, length=swap_size)
+    for part_type, geom in [("fat32", fat32_geom), ("ext4", ext4_geom), ("linux-swap", swap_geom)]:
+        partition = parted.Partition(disk=disk, type=parted.PARTITION_NORMAL, geometry=geom)
         disk.addPartition(partition,constraint=constraint)
-        partition.getPedPartition().set_system(params['type'])
-
-    disk.commit()
+        part_type_ped = _ped.file_system_type_get(part_type)
+        partition.getPedPartition().set_system(part_type_ped)
 
 def format_boot(device_path):
     print "FORMATTING BOOT (FAT32)"
@@ -240,6 +225,7 @@ def simple_call(params):
     check_call(params.split(' '))
 
 def sync_firmware(source_firmware_path, target_firmware_path):
+    assert os.path.ismount(target_firmware_path)
     simple_call("%s %s/ %s/" % (rsync_command_firmware, source_firmware_path, target_firmware_path))
 
     # git version 
@@ -258,16 +244,22 @@ def sync_firmware(source_firmware_path, target_firmware_path):
     shutil.copy2('%s/kcmd_default.txt' % target_firmware_path, kcmd_main_path)      
 
 def mount_partition(device_path, target_dir):
+    assert not os.path.ismount(target_dir)
+    if not os.path.exists(target_dir):
+        os.makedirs(target_dir)
     simple_call("mount %s %s" % (device_path, target_dir))  
 
 def umount_partition(target_dir):
     simple_call("umount %s" % (target_dir)) 
+    if os.path.exists(target_dir):
+        os.rmdir(target_dir)
 
 def get_git_version(git_path):
     repo = git.Repo(git_path)
     return repo.git.describe("--always") + "\n"
 
 def sync_os(source_os_path, target_os_path):
+    assert os.path.ismount(target_os_path)
     simple_call("%s %s/ %s/" % (rsync_command_os, source_os_path, target_os_path))
 
     # slightly different configuration between
@@ -290,8 +282,7 @@ def create_cmd(kcmd, overrides=None):
 
 def force_umount(device_path):
     print "forcing umount of %s, ignore errors" % device_path
-    os.system("umount %s1" % (device_path)) 
-    os.system("pumount %s2" % (device_path))    
+    os.system("umount %s" % (device_path))   
 
 def partition_copy(device_path):
     simple_call("dd if=/dev/zero of=%s bs=1024 count=1" % device_path)
@@ -314,8 +305,8 @@ try:
     
     if options.mount:
         print "UN-mounting devices"
-        umount_partition('/media/os')
-        umount_partition('/media/BOOT')
+        force_umount(options.device_path + '1')
+        force_umount(options.device_path + '2')
 
     if options.create_partition:
         if verify_partitions(options.device_path, partitions):
@@ -323,9 +314,6 @@ try:
         else:
             print "partitions don't match target, recreating"   
             create_partitions(options.device_path, partitions)
-            options.format_boot = True
-            options.format_os = True
-            options.format_swap = True
 
     else:
         print "skipping partition check"
@@ -347,18 +335,22 @@ try:
     #verify_repos(target_rev, [source_firmware_path, source_os_path])
     if options.mount:
         print "mounting devices"
-        mount_partition('%s1' % options.device_path, '/media/os')
-        mount_partition('%s2' % options.device_path, '/media/BOOT')
+        mount_partition('%s1' % options.device_path, '/media/BOOT')
+        mount_partition('%s2' % options.device_path, '/media/os')
     else:
         print "skipping mount"
 
     if options.sync_os:
         print "syncing OS filesystem"
         sync_os(options.source_os_path, options.target_os_path) 
+    else:
+        print "not syncing OS filesystem"
 
     if options.sync_firmware:
         print "syncing firmware filesystem"
         sync_firmware(options.source_firmware_path, options.target_firmware_path)
+    else:
+        print "not syncing firwmare filesystem"
 
     if options.mount:
         print "UN-mounting devices"
@@ -368,6 +360,6 @@ try:
         print "skipping umount"
 
 except Exception as e:
-    tb = traceback.format_exc()
-    print tb
-    code.interact(banner="", local=globals())
+    print traceback.format_exc()
+    from pdb import set_trace; set_trace()
+
