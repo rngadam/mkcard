@@ -9,10 +9,15 @@ You may also want to specify the firmware source (--firmware) and os source dire
 Creating partitions and formatting them:
 
     sudo ./mkcard.py --create_partition --format_boot --format_os --format_swap
-
-Mounting disks, syncing data partitions and umounting:
+Mounting
+ disks, syncing data partitions and umounting:
 
     sudo ./mkcard.py --mount --sync_os --sync_firmware
+
+Updating from a running Lophilo using a exported NFS drive with Lophilo OS on it (make sure that the files after with the right permissions):
+
+	# mount -t nfs -o all_no_squash 10.42.0.1:/home/rngadam/lophilo.nfs lophilo.nfs   
+	# ~/lophilo/mkcard/mkcard.py --sync_os --target_os /
 
 ## Pre-requisites:
 
