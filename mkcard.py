@@ -246,12 +246,14 @@ def sync_firmware(source_firmware_path, target_firmware_path):
 def mount_partition(device_path, target_dir):
     assert not os.path.ismount(target_dir)
     if not os.path.exists(target_dir):
+        print "creating %s" % target_dir
         os.makedirs(target_dir)
     simple_call("mount %s %s" % (device_path, target_dir))  
 
 def umount_partition(target_dir):
     simple_call("umount %s" % (target_dir)) 
     if os.path.exists(target_dir):
+        print "removing %s" % target_dir        
         os.rmdir(target_dir)
 
 def get_git_version(git_path):
