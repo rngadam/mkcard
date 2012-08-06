@@ -62,7 +62,7 @@ partitions = [
     'type': "ext4"
     },
     {
-    'length': 256,
+    'length': 1024,
     'type': "linux-swap"
     }
 ]
@@ -153,24 +153,17 @@ def verify_partitions(device_path, partitions):
         current_partition = disk.partitions[part_id]
         target_partition = partitions[part_id]        
 
-        # current_partition_start = current_partition.getPedPartition().geom.start
-        # target_partition_start = target_partition['start']
-        # if current_partition_start != target_partition_start:
-        #     print "start is not the same. current: %d target: %d" % (current_partition_start, target_partition_start)
-        #     return False
+        # check filesystem type
+        if not current_partition.fileSystem:
+            # no filesystem...
+            return False
 
-        # current_partition_end = current_partition.getPedPartition().geom.end
-        # target_partition_end = target_partition['end']
-        # if current_partition_end != target_partition_end:
-        #     print "end is not the same. current: %d target: %d" % (current_partition_end, target_partition_end)
-        #     return False
-
-        # check if the partition are in use... if yes, abort
         current_fs_type = current_partition.fileSystem.getPedFileSystem().type.name
         if current_fs_type != target_partition['type']:
             print "partition type does not match: expected %s, got %s" % (target_partition['type'], current_fs_type)
             return False
 
+        # check if the partition are in use... if yes, abort
         if current_partition.busy:
             raise mkcardException("Partition is busy %s, please umount first" % current_partition)
 
@@ -324,6 +317,8 @@ try:
         print "skipping partition check"
         
     if options.format_boot:
+        print "re-UN-mounting devices (gets remounted by system)"
+        force_umount(options.device_path + '1')
         format_boot(options.device_path)
     else:
         print "not formatting boot partition"
