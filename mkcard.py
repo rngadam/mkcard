@@ -178,7 +178,7 @@ def verify_partitions(device_path, partitions):
 
 
 def mb_to_sector(disk, mb):
-    return  mb*1024*1024/disk.device.sectorSize
+    return  (mb*1024*1024)/disk.device.sectorSize
 
 def create_partitions(device_path, partitions):
     device = parted.getDevice(device_path)
@@ -195,17 +195,20 @@ def create_partitions(device_path, partitions):
 
     constraint = parted.Constraint(device=device)
     max_length_sectors = disk.device.getLength()
-    fat32_size = mb_to_sector(disk, partitions[0].length)
-    swap_size = mb_to_sector(disk, partitions[2].length)
+    fat32_size = mb_to_sector(disk, partitions[0]['length'])
+    swap_size = mb_to_sector(disk, partitions[2]['length'])
     ext4_size = max_length_sectors - (fat32_size+swap_size)
     fat32_geom = parted.Geometry(device=device, start=0, length=fat32_size)
     ext4_geom = parted.Geometry(device=device, start=fat32_size, length=ext4_size)
     swap_geom = parted.Geometry(device=device, start=ext4_size+fat32_size, length=swap_size)
     for part_type, geom in [("fat32", fat32_geom), ("ext4", ext4_geom), ("linux-swap", swap_geom)]:
+        print "creating %s with geom: %s" % (part_type, geom)
         partition = parted.Partition(disk=disk, type=parted.PARTITION_NORMAL, geometry=geom)
         disk.addPartition(partition,constraint=constraint)
         part_type_ped = _ped.file_system_type_get(part_type)
         partition.getPedPartition().set_system(part_type_ped)
+    disk.commitToDevice()
+    disk.commitToOS()        
 
 def format_boot(device_path):
     print "FORMATTING BOOT (FAT32)"
