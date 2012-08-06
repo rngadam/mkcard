@@ -1,5 +1,9 @@
 # Create MicroSD card for Lophilo
 
+Dependencies:
+
+  sudo apt-get install python-parted python-git
+
 Usage:
 
 Make sure to specify the device with --dev. Examples below use the default (/dev/sdb). 
