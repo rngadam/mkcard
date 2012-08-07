@@ -261,11 +261,16 @@ def sync_os(source_os_path, target_os_path):
     simple_call("%s %s/ %s/" % (rsync_command_os, source_os_path, target_os_path))
 
     # slightly different configuration between
-    # NFS boot and MicroSD card boot
-    shutil.copy2('%s/microsd-fstab' % basedir, '%s/etc/fstab' % source_os_path)
+    # NFS boot and MicroSD card boot: we don't mount OS partition with SD boot
+    shutil.copy2('%s/microsd-fstab' % basedir, '%s/etc/fstab' % target_os_path)
 
     # keep track of version
     file('%s/etc/lophilo_version' % target_os_path, "w+").write(get_git_version(source_os_path))
+    
+    # fix incorrect extendend permissions introduced by git
+    simple_call("chmod a+s %s/usr/bin/sudo" % target_os_path)
+    simple_call("chmod 0440 %s/etc/sudoers" % target_os_path)
+    simple_call("chmod 0440 %s/etc/sudoers.d/README" % target_os_path)
 
 def create_cmd(kcmd, overrides=None):
     if overrides:
