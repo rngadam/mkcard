@@ -79,7 +79,8 @@ rsync_command_os = (
     " %s/excluded-files --delete-excluded" % basedir)
 rsync_command_firmware = (
     "rsync -vdrzx --delete-delay"
-    " --exclude-from %s/excluded-files" % basedir)
+    " --exclude-from %s/excluded-files"
+    " --exclude vmlinux --exclude vmlinux-debug" % basedir)
 
 target_rev = 'tabbyrev1'
 
@@ -256,21 +257,35 @@ def get_git_version(git_path):
     repo = git.Repo(git_path)
     return repo.git.describe("--always") + "\n"
 
+def comment_out_mount(fstab_path, device):
+    lines = file(fstab_path, 'r').readlines()
+    output_file = file(fstab_path, 'w')
+    for l in lines:
+        if l.startswith(device):
+            l = '# ' + l
+        output_file.write(l)
+
 def sync_os(source_os_path, target_os_path):
     assert os.path.ismount(target_os_path)
     simple_call("%s %s/ %s/" % (rsync_command_os, source_os_path, target_os_path))
 
     # slightly different configuration between
     # NFS boot and MicroSD card boot: we don't mount OS partition with SD boot
-    shutil.copy2('%s/microsd-fstab' % basedir, '%s/etc/fstab' % target_os_path)
+    #shutil.copy2('%s/microsd-fstab' % basedir, '%s/etc/fstab' % target_os_path)
+    comment_out_mount('%s/etc/fstab' % target_os_path, '/dev/mmcblk0p2')
 
+    # we do want to automatically configure the interfaces with dhcp
+    shutil.copy2('%s/microsd-interfaces' % basedir, '%s/etc/network/interfaces' % target_os_path)
+    
     # keep track of version
     file('%s/etc/lophilo_version' % target_os_path, "w+").write(get_git_version(source_os_path))
     
     # fix incorrect extendend permissions introduced by git
-    simple_call("chmod a+s %s/usr/bin/sudo" % target_os_path)
-    simple_call("chmod 0440 %s/etc/sudoers" % target_os_path)
-    simple_call("chmod 0440 %s/etc/sudoers.d/README" % target_os_path)
+    # in both source and target directory
+    for path in [target_os_path, source_os_path]:
+        simple_call("chmod a+s %s/usr/bin/sudo" % path)
+        simple_call("chmod 0440 %s/etc/sudoers" % path)
+        simple_call("chmod 0440 %s/etc/sudoers.d/README" % path)
 
 def create_cmd(kcmd, overrides=None):
     if overrides:
