@@ -22,6 +22,7 @@ import parted
 import shutil
 import git
 import sys
+import re
 
 from collections import OrderedDict
 from subprocess import check_call
@@ -82,59 +83,69 @@ rsync_command_firmware = (
     " --exclude-from %s/excluded-files"
     " --exclude vmlinux --exclude vmlinux-debug" % basedir)
 
-target_rev = 'tabbyrev1'
-
 # command-line parsing
 parser = OptionParser()
 
 # PARAMETERS
-parser.add_option("-d", "--device", 
+parser.add_option("--device", 
                   action="store", type="string", dest="device_path",
                   help="use DEVICE", metavar="DEVICE",
                   default="/dev/sdb")
-parser.add_option("-f", "--firmware", action="store", 
+parser.add_option("--firmware", action="store", 
                   type="string", dest="source_firmware_path",
                   help="source firmware directory", metavar="DIRECTORY",
                   default="%s/lophilo/firmware-binaries" % os.getenv("HOME"))
-parser.add_option("-u", "--target_firmware", 
+parser.add_option("--target_firmware", 
                   action="store", type="string", dest="target_firmware_path",
                   help="target OS directory", metavar="DIRECTORY",
-                  default="/media/BOOT")
-parser.add_option("-o", "--os", 
+                  default="/media/BOOT-mkcard")
+parser.add_option("--os", 
                   action="store", type="string", dest="source_os_path",
                   help="source OS directory", metavar="DIRECTORY",
                   default="%s/lophilo.nfs" % os.getenv("HOME"))
-parser.add_option("-t", "--target_os", action="store", 
+parser.add_option("--target_os", action="store", 
                   type="string", dest="target_os_path",
                   help="target firmware directory", metavar="DIRECTORY",
-                  default="/media/os")
+                  default="/media/os-mkcard")
+parser.add_option("--clone_boot_source", 
+                  action="store", type="string", dest="clone_boot_source",
+                  help="use FILE", metavar="FILE",
+                  default="sdb1.img")
 
 # ACTIONS
-parser.add_option("-c", "--create_partition",
+parser.add_option("--create_partition",
                   action="store_true", dest="create_partition", 
                   help="check and change partitions",
                   default=False)
-parser.add_option("-b", "--format_boot",
+parser.add_option("--force_partition",
+                  action="store_true", dest="force_partition", 
+                  help="force creation of partitions even if they only differ in size",
+                  default=False)
+parser.add_option("--clone_boot",
+                  action="store_true", dest="clone_boot",
+                  help="clone boot partition",
+                  default=False)
+parser.add_option("--format_boot",
                   action="store_true", dest="format_boot",
                   help="force format boot partition",
                   default=False)
-parser.add_option("-m", "--format_os",
+parser.add_option("--format_os",
                   action="store_true", dest="format_os", 
                   help="force format OS partition",
                   default=False)
-parser.add_option("-w", "--format_swap",
+parser.add_option("--format_swap",
                   action="store_true", dest="format_swap",
                   help="force format SWAP partition", 
                   default=False)
-parser.add_option("-n", "--mount",
+parser.add_option("--mount",
                   action="store_true", dest="mount", 
                   help="mount partitions to filesystem",
                   default=False,)
-parser.add_option("-a", "--sync_os",
+parser.add_option("--sync_os",
                   action="store_true", dest="sync_os", 
                   help="sync OS filesystem",
                   default=False,)
-parser.add_option("-z", "--sync_firmware",
+parser.add_option("--sync_firmware",
                   action="store_true", dest="sync_firmware", 
                   help="sync firmware filesystem",
                   default=False)
@@ -143,8 +154,12 @@ parser.add_option("-z", "--sync_firmware",
 
 
 def verify_partitions(device_path, partitions):
-    device = parted.getDevice(device_path)
-    disk = parted.Disk(device)
+    try:
+        device = parted.getDevice(device_path)
+        disk = parted.Disk(device)
+    except parted.DiskLabelException:
+        print "disk is not initialized"
+        return False
 
     if len(partitions) != len(disk.partitions):
         print "partitions differ in length: desired %d current %d" % (len(partitions), len(disk.partitions))
@@ -157,10 +172,11 @@ def verify_partitions(device_path, partitions):
         # check filesystem type
         if not current_partition.fileSystem:
             # no filesystem...
+            print "no filesystem found on partition %d" % part_id
             return False
 
         current_fs_type = current_partition.fileSystem.getPedFileSystem().type.name
-        if current_fs_type != target_partition['type']:
+        if not current_fs_type.startswith(target_partition['type']): # linux-swap -> linux-swap(v1)
             print "partition type does not match: expected %s, got %s" % (target_partition['type'], current_fs_type)
             return False
 
@@ -175,13 +191,16 @@ def mb_to_sector(disk, mb):
     return  (mb*1024*1024)/disk.device.sectorSize
 
 def create_partitions(device_path, partitions):
-    device = parted.getDevice(device_path)
-    disk = parted.Disk(device)
+    try:
+        device = parted.getDevice(device_path)
+        disk = parted.Disk(device)
 
-    # prompt user before wiping out disk...
-    disk.deleteAllPartitions()
-    disk.commitToDevice()
-    disk.commitToOS()
+        # prompt user before wiping out disk...
+        disk.deleteAllPartitions()
+        disk.commitToDevice()
+        disk.commitToOS()
+    except parted.DiskLabelException:
+        print "disk is not initialized, ignoring"
 
     # create volatile store for new partition information
     # create fat, ext4 and swap partition
@@ -204,18 +223,18 @@ def create_partitions(device_path, partitions):
     disk.commitToDevice()
     disk.commitToOS()        
 
-def format_boot(device_path):
+def format_boot(partition_path):
     print "FORMATTING BOOT (FAT32)"
-    simple_call("dd if=/dev/zero of=%s1 bs=512 count=1" % (device_path))
-    simple_call("mkdosfs -F 32 %s1 -n BOOT -v" % (device_path))
+    simple_call("dd if=/dev/zero of=%s bs=512 count=1" % (partition_path))
+    simple_call("mkdosfs -F 32 %s -n BOOT -v" % (partition_path))
 
-def format_os(device_path):
+def format_os(partition_path):
     print "FORMATTING EXT4"
-    simple_call("mkfs.ext4 %s2 -L os -v" % (device_path))
+    simple_call("mkfs.ext4 %s -L os -v" % (partition_path))
 
-def format_swap(device_path):
+def format_swap(partition_path):
     print "FORMATTING SWAP" 
-    simple_call("mkswap -L lplswap %s3" % (device_path))    
+    simple_call("mkswap -L lplswap %s" % (partition_path))    
 
 def simple_call(params):
     print "executing: %s" % params
@@ -254,8 +273,11 @@ def umount_partition(target_dir):
         os.rmdir(target_dir)
 
 def get_git_version(git_path):
-    repo = git.Repo(git_path)
-    return repo.git.describe("--always") + "\n"
+    try:
+        repo = git.Repo(git_path)
+        return repo.git.describe("--always") + "\n"
+    except git.errors.InvalidGitRepositoryError:
+        return "not from version controlled git source"
 
 def comment_out_mount(fstab_path, device):
     lines = file(fstab_path, 'r').readlines()
@@ -282,10 +304,13 @@ def sync_os(source_os_path, target_os_path):
     
     # fix incorrect extendend permissions introduced by git
     # in both source and target directory
-    for path in [target_os_path, source_os_path]:
-        simple_call("chmod a+s %s/usr/bin/sudo" % path)
-        simple_call("chmod 0440 %s/etc/sudoers" % path)
-        simple_call("chmod 0440 %s/etc/sudoers.d/README" % path)
+    if os.path.isfile("%s/usr/bin/sudo" % source_os_path):
+        for path in [target_os_path, source_os_path]:
+            simple_call("chmod a+s %s/usr/bin/sudo" % path)
+            simple_call("chmod 0440 %s/etc/sudoers" % path)
+            simple_call("chmod 0440 %s/etc/sudoers.d/README" % path)
+    else:
+        print "no sudo binary on target system (debootstrap?)"
 
 def create_cmd(kcmd, overrides=None):
     if overrides:
@@ -298,6 +323,14 @@ def create_cmd(kcmd, overrides=None):
     params.extend([k for k in kcmd if not kcmd[k]])
     return ' '.join(params)
 
+def get_device_partition(device_path, partition):
+    # /dev/mmcblk0 -> /dev/mmcblk0p1
+    # /dev/sdb -> /dev/sdb1
+    if device_path[-1].isdigit():
+        return "%sp%d" % (device_path, partition)
+    else:
+        return "%s%d" % (device_path, partition)
+
 def force_umount(device_path):
     print "forcing umount of %s, ignore errors" % device_path
     os.system("umount %s" % (device_path))   
@@ -307,8 +340,30 @@ def partition_copy(device_path):
     simple_call("dd if=partition-table of=%s bs=512 count=1" % device_path)
 
 def boot_partition_copy(device_path):
-    simple_call("dd if=dos-partition-extract of=%s1" % device_path)
+    simple_call("dd if=dos-partition-extract of=%s" % get_device_partition(device_path, 1))
 
+def get_partition_size(partition):
+    for l in file('/proc/partitions').readlines()[2:]:
+        if partition.endswith(re.split('\W+', l)[4]):
+            return int(re.split('\W+', l)[3])*1024+512 
+
+def clone(source, dest):
+    if os.path.isfile(source):
+        source_size = os.path.getsize(source)
+    else:
+        source_size = get_partition_size(source)
+
+    if os.path.isfile(dest):
+        dest_size = os.path.getsize(dest)
+    else:
+        dest_size = get_partition_size(dest)
+
+	assert source_size ==  dest_size, "%d > %d for %s, %s" %  (
+        source_size, dest_size, source, dest)
+
+	simple_call("dd if=%s of=%s" % (source, dest))
+
+# TODO: unused function, keeping for future reference
 def verify_repos(target_rev, repo_paths):
     for repo_path in repo_paths:
         repo = git.Repo(repo_path)
@@ -319,44 +374,54 @@ def verify_repos(target_rev, repo_paths):
         else:
             print 'OK: repo %s active_branch is %s' % (repo, target_rev)
 
-try:
-    
+def main():
     if options.mount:
         print "UN-mounting devices"
-        force_umount(options.device_path + '1')
-        force_umount(options.device_path + '2')
+        force_umount(get_device_partition(options.device_path, 1))
+        force_umount(get_device_partition(options.device_path, 2))
 
     if options.create_partition:
         if verify_partitions(options.device_path, partitions):
             print "partitions are OK"
+            if options.force_partition:
+                print "re-creating partitions anyway to match size"
+                create_partitions(options.device_path, partitions)    
         else:
             print "partitions don't match target, recreating"   
             create_partitions(options.device_path, partitions)
+
 
     else:
         print "skipping partition check"
         
     if options.format_boot:
         print "re-UN-mounting devices (gets remounted by system)"
-        force_umount(options.device_path + '1')
-        format_boot(options.device_path)
+        force_umount(get_device_partition(options.device_path, 1))
+        format_boot(get_device_partition(options.device_path, 1))
     else:
         print "not formatting boot partition"
+	
+	if options.clone_boot:
+		target_dev = get_device_partition(options.device_path, 1)
+		print "cloning from %s to %s" % (options.clone_boot_source, target_dev)
+		clone(options.clone_boot_source, target_dev)
+	else:
+		print "not cloning boot partition"
+
     if options.format_os:
-        format_os(options.device_path)
+        format_os(get_device_partition(options.device_path, 2))
     else:
         print "not formatting os partition"
 
     if options.format_swap:
-        format_swap(options.device_path)
+        format_swap(get_device_partition(options.device_path, 3))
     else:
         print "not formatting swap partition"       
 
-    #verify_repos(target_rev, [source_firmware_path, source_os_path])
     if options.mount:
         print "mounting devices"
-        mount_partition('%s1' % options.device_path, '/media/BOOT')
-        mount_partition('%s2' % options.device_path, '/media/os')
+        mount_partition(get_device_partition(options.device_path, 1), options.target_firmware_path)
+        mount_partition(get_device_partition(options.device_path, 2), options.target_os_path)
     else:
         print "skipping mount"
 
@@ -370,16 +435,14 @@ try:
         print "syncing firmware filesystem"
         sync_firmware(options.source_firmware_path, options.target_firmware_path)
     else:
-        print "not syncing firwmare filesystem"
+        print "not syncing firmware filesystem"
 
     if options.mount:
         print "UN-mounting devices"
-        umount_partition('/media/os')
-        umount_partition('/media/BOOT') 
+        umount_partition(options.target_os_path)
+        umount_partition(options.target_firmware_path) 
     else:
         print "skipping umount"
 
-except Exception as e:
-    print traceback.format_exc()
-    from pdb import set_trace; set_trace()
-
+if __name__ == '__main__':
+    main()

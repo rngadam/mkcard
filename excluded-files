@@ -50,3 +50,5 @@
 - .***.swp
 - .created_by_pmount
 - kcmd*.txt
+- /root/*
+- /home/*
