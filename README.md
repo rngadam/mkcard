@@ -42,3 +42,9 @@ Workaround, using a Windows machine:
 * backup files from DOS BOOT partition
 * quick format dos partition
 * copy files from backup back into dos partition
+
+Also: you can use an existing image downloaded from:
+
+	https://github.com/Lophilo/lophilo/downloads
+
+...and use mkcard.py --clone_boot option...
