@@ -41,4 +41,4 @@ Workaround, using a Windows machine:
 
 * backup files from DOS BOOT partition
 * quick format dos partition
-* copy files from backup 
+* copy files from backup back into dos partition

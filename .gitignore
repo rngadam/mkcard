@@ -41,3 +41,4 @@ home/build/*
 var/lib/dpkg/info/*
 var/cache/apt/archives/*
 var/cache/man/*
+***/*~backup*/

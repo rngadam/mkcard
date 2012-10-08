@@ -12,16 +12,15 @@
 - /sys/*
 - /mnt/*
 - **.pid
-- **.log
 - **.leases
 - .nfs**
-- **.log
 - **.pid
 - /tmp/*
 - **~
 - /var/log/dmesg*
 - debug
 - syslog
+- /var/log/*.log
 - /var/log/boot
 - /var/log/btmp
 - /var/log/debug
@@ -51,4 +50,4 @@
 - .created_by_pmount
 - kcmd*.txt
 - /root/*
-- /home/*
+- /usr/lib/node_modules/cloud9/.sessions/*
