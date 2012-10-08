@@ -35,9 +35,9 @@ class mkcardException(Exception):
 
 kcmd_default = OrderedDict({
     'mem': '128M',
-    'ip': 'none',
+    'ip': 'dhcp',
     'noinitrd': None,
-    'init': '/sbin/init',
+    'init': '/bin/systemd',
     'rw': None,
     'root': '/dev/mmcblk0p2',
     'elevator': 'noop',
@@ -47,7 +47,6 @@ kcmd_default = OrderedDict({
 
 kcmd_nfs = OrderedDict({
     'root': '/dev/nfs',
-    'ip': 'dhcp',
     'nfsroot': '10.42.0.1:/home/rngadam/lophilo.nfs',
     'nfsrootdebug': None,
     'rootwait': None,
@@ -306,6 +305,7 @@ def sync_os(source_os_path, target_os_path):
     # in both source and target directory
     if os.path.isfile("%s/usr/bin/sudo" % source_os_path):
         for path in [target_os_path, source_os_path]:
+            simple_call("chmod a+s %s/bin/ping" % path)
             simple_call("chmod a+s %s/usr/bin/sudo" % path)
             simple_call("chmod 0440 %s/etc/sudoers" % path)
             simple_call("chmod 0440 %s/etc/sudoers.d/README" % path)
@@ -446,3 +446,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
