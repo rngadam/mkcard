@@ -18,7 +18,6 @@
 - /tmp/*
 - **~
 - /var/log/dmesg*
-- debug
 - syslog
 - /var/log/*.log
 - /var/log/boot
@@ -50,4 +49,5 @@
 - .created_by_pmount
 - kcmd*.txt
 - /root/*
-- /usr/lib/node_modules/cloud9/.sessions/*
+- **/cloud9/.sessions/*
+- **/lmc/users/*
