@@ -16,4 +16,5 @@ sudo $DIR/mkcard.py \
 	--os / \
 	--mount \
 	--sync_os \
-	--sync_firmware
+	--sync_firmware \
+	--firmware /home/lophilo/lophilo/firmware-binaries
