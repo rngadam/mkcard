@@ -17,7 +17,7 @@
 import _ped
 import os
 import code
-import traceback 
+import traceback
 import parted
 import shutil
 import git
@@ -31,7 +31,6 @@ from subprocess import Popen, PIPE
 
 class mkcardException(Exception):
     pass
-
 
 kcmd_default = OrderedDict({
     'mem': '128M',
@@ -86,38 +85,38 @@ rsync_command_firmware = (
 parser = OptionParser()
 
 # PARAMETERS
-parser.add_option("--device", 
+parser.add_option("--device",
                   action="store", type="string", dest="device_path",
                   help="use DEVICE", metavar="DEVICE",
                   default="/dev/sdb")
-parser.add_option("--firmware", action="store", 
+parser.add_option("--firmware", action="store",
                   type="string", dest="source_firmware_path",
                   help="source firmware directory", metavar="DIRECTORY",
                   default="%s/lophilo/firmware-binaries" % os.getenv("HOME"))
-parser.add_option("--target_firmware", 
+parser.add_option("--target_firmware",
                   action="store", type="string", dest="target_firmware_path",
                   help="target OS directory", metavar="DIRECTORY",
                   default="/media/BOOT-mkcard")
-parser.add_option("--os", 
+parser.add_option("--os",
                   action="store", type="string", dest="source_os_path",
                   help="source OS directory", metavar="DIRECTORY",
                   default="%s/lophilo.nfs" % os.getenv("HOME"))
-parser.add_option("--target_os", action="store", 
+parser.add_option("--target_os", action="store",
                   type="string", dest="target_os_path",
                   help="target firmware directory", metavar="DIRECTORY",
                   default="/media/os-mkcard")
-parser.add_option("--clone_boot_source", 
+parser.add_option("--clone_boot_source",
                   action="store", type="string", dest="clone_boot_source",
                   help="use FILE", metavar="FILE",
                   default="sdb1.img")
 
 # ACTIONS
 parser.add_option("--create_partition",
-                  action="store_true", dest="create_partition", 
+                  action="store_true", dest="create_partition",
                   help="check and change partitions",
                   default=False)
 parser.add_option("--force_partition",
-                  action="store_true", dest="force_partition", 
+                  action="store_true", dest="force_partition",
                   help="force creation of partitions even if they only differ in size",
                   default=False)
 parser.add_option("--clone_boot",
@@ -129,23 +128,23 @@ parser.add_option("--format_boot",
                   help="force format boot partition",
                   default=False)
 parser.add_option("--format_os",
-                  action="store_true", dest="format_os", 
+                  action="store_true", dest="format_os",
                   help="force format OS partition",
                   default=False)
 parser.add_option("--format_swap",
                   action="store_true", dest="format_swap",
-                  help="force format SWAP partition", 
+                  help="force format SWAP partition",
                   default=False)
 parser.add_option("--mount",
-                  action="store_true", dest="mount", 
+                  action="store_true", dest="mount",
                   help="mount partitions to filesystem",
                   default=False,)
 parser.add_option("--sync_os",
-                  action="store_true", dest="sync_os", 
+                  action="store_true", dest="sync_os",
                   help="sync OS filesystem",
                   default=False,)
 parser.add_option("--sync_firmware",
-                  action="store_true", dest="sync_firmware", 
+                  action="store_true", dest="sync_firmware",
                   help="sync firmware filesystem",
                   default=False)
 
@@ -166,7 +165,7 @@ def verify_partitions(device_path, partitions):
 
     for part_id in xrange(0, len(partitions)):
         current_partition = disk.partitions[part_id]
-        target_partition = partitions[part_id]        
+        target_partition = partitions[part_id]
 
         # check filesystem type
         if not current_partition.fileSystem:
@@ -220,7 +219,7 @@ def create_partitions(device_path, partitions):
         part_type_ped = _ped.file_system_type_get(part_type)
         partition.getPedPartition().set_system(part_type_ped)
     disk.commitToDevice()
-    disk.commitToOS()        
+    disk.commitToOS()
 
 def format_boot(partition_path):
     print "FORMATTING BOOT (FAT32)"
@@ -232,8 +231,8 @@ def format_os(partition_path):
     simple_call("mkfs.ext4 %s -L os -v" % (partition_path))
 
 def format_swap(partition_path):
-    print "FORMATTING SWAP" 
-    simple_call("mkswap -L lplswap %s" % (partition_path))    
+    print "FORMATTING SWAP"
+    simple_call("mkswap -L lplswap %s" % (partition_path))
 
 def simple_call(params):
     print "executing: %s" % params
@@ -243,7 +242,7 @@ def sync_firmware(source_firmware_path, target_firmware_path):
     assert os.path.ismount(target_firmware_path)
     simple_call("%s %s/ %s/" % (rsync_command_firmware, source_firmware_path, target_firmware_path))
 
-    # git version 
+    # git version
     file('%s/firmware.txt' % target_firmware_path, "w+").write(get_git_version(source_firmware_path))
 
     # write the kcmd references
@@ -255,20 +254,20 @@ def sync_firmware(source_firmware_path, target_firmware_path):
     file('%s/kcmd_nfs.txt' % target_firmware_path, "w+").write(kcmd_nfs_str)
     kcmd_main_path = '%s/kcmd.txt' % target_firmware_path
     if os.path.isfile(kcmd_main_path):
-        shutil.copy2(kcmd_main_path, '%s/kcmd.txt.bak' % target_firmware_path)  
-    shutil.copy2('%s/kcmd_default.txt' % target_firmware_path, kcmd_main_path)      
+        shutil.copy2(kcmd_main_path, '%s/kcmd.txt.bak' % target_firmware_path)
+    shutil.copy2('%s/kcmd_default.txt' % target_firmware_path, kcmd_main_path)
 
 def mount_partition(device_path, target_dir):
     assert not os.path.ismount(target_dir)
     if not os.path.exists(target_dir):
         print "creating %s" % target_dir
         os.makedirs(target_dir)
-    simple_call("mount %s %s" % (device_path, target_dir))  
+    simple_call("mount %s %s" % (device_path, target_dir))
 
 def umount_partition(target_dir):
-    simple_call("umount %s" % (target_dir)) 
+    simple_call("umount %s" % (target_dir))
     if os.path.exists(target_dir):
-        print "removing %s" % target_dir        
+        print "removing %s" % target_dir
         os.rmdir(target_dir)
 
 def get_git_version(git_path):
@@ -297,10 +296,10 @@ def sync_os(source_os_path, target_os_path):
 
     # we do want to automatically configure the interfaces with dhcp
     shutil.copy2('%s/microsd-interfaces' % basedir, '%s/etc/network/interfaces' % target_os_path)
-    
+
     # keep track of version
     file('%s/etc/lophilo_version' % target_os_path, "w+").write(get_git_version(source_os_path))
-    
+
     # fix incorrect extendend permissions introduced by git
     # in both source and target directory
     if os.path.isfile("%s/usr/bin/sudo" % source_os_path):
@@ -333,7 +332,7 @@ def get_device_partition(device_path, partition):
 
 def force_umount(device_path):
     print "forcing umount of %s, ignore errors" % device_path
-    os.system("umount %s" % (device_path))   
+    os.system("umount %s" % (device_path))
 
 def partition_copy(device_path):
     simple_call("dd if=/dev/zero of=%s bs=1024 count=1" % device_path)
@@ -345,7 +344,7 @@ def boot_partition_copy(device_path):
 def get_partition_size(partition):
     for l in file('/proc/partitions').readlines()[2:]:
         if partition.endswith(re.split('\W+', l)[4]):
-            return int(re.split('\W+', l)[3])*1024+512 
+            return int(re.split('\W+', l)[3])*1024+512
 
 def clone(source, dest):
     if os.path.isfile(source):
@@ -385,22 +384,20 @@ def main():
             print "partitions are OK"
             if options.force_partition:
                 print "re-creating partitions anyway to match size"
-                create_partitions(options.device_path, partitions)    
+                create_partitions(options.device_path, partitions)
         else:
-            print "partitions don't match target, recreating"   
+            print "partitions don't match target, recreating"
             create_partitions(options.device_path, partitions)
-
-
     else:
         print "skipping partition check"
-        
+
     if options.format_boot:
         print "re-UN-mounting devices (gets remounted by system)"
         force_umount(get_device_partition(options.device_path, 1))
         format_boot(get_device_partition(options.device_path, 1))
     else:
         print "not formatting boot partition"
-	
+
 	if options.clone_boot:
 		target_dev = get_device_partition(options.device_path, 1)
 		print "cloning from %s to %s" % (options.clone_boot_source, target_dev)
@@ -416,7 +413,7 @@ def main():
     if options.format_swap:
         format_swap(get_device_partition(options.device_path, 3))
     else:
-        print "not formatting swap partition"       
+        print "not formatting swap partition"
 
     if options.mount:
         print "mounting devices"
@@ -427,7 +424,7 @@ def main():
 
     if options.sync_os:
         print "syncing OS filesystem"
-        sync_os(options.source_os_path, options.target_os_path) 
+        sync_os(options.source_os_path, options.target_os_path)
     else:
         print "not syncing OS filesystem"
 
@@ -440,7 +437,7 @@ def main():
     if options.mount:
         print "UN-mounting devices"
         umount_partition(options.target_os_path)
-        umount_partition(options.target_firmware_path) 
+        umount_partition(options.target_firmware_path)
     else:
         print "skipping umount"
 
