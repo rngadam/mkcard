@@ -51,3 +51,4 @@
 - /root/*
 - **/cloud9/.sessions/*
 - **/lmc/users/*
+- **/lmc/testbench/*
